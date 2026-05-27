@@ -28,7 +28,8 @@ socat config will be important to mock our industrial application.
  
 we will decide opentelesymtry later, as its agnostic behavior is a stand out freature. 
 
-
+SCADA will be obvious obtion for ingress. we will talk later about this.
+Main.go - Modbus TCP - SCADA 
 
 
 
@@ -91,3 +92,59 @@ When your C core receives the packet, it runs the exact same math formula over t
 The C core compares its result to the CRC-8 byte sent at the end of the packet.
 
 If they match, the packet is perfectly intact. If a single bit was corrupted during transmission, the math fails, the C core drops the packet immediately, and it never pollutes your Go supervisor with bad data.
+
+
+
+ok we have read, and thought lets start with the lowest layer and work our way up. its 27/06/2026 let see how long this project takes, first repo took me quite a few months due to inactivity and losing intrests i expect the same, reguardless i think the gain of understanding and building my portfoilio will be a accomplishemnt in the end.
+
+
+protocol.h, lets talk about its funtions line by line: 
+
+#ifndef ITB_PROTOCOL_H 
+#define ITB_PROTOCOL_H 
+...
+#endif 
+
+Include Guard: these line prevent the complier from duplicating the code, which would cause and "identity crisis. if the go project includes this file multiple times across differnt modules. 
+
+#include <stdint.h>
+#include <stddef.h>
+
+Standard C Integers: (int, long) changes size depedant on the system, 32-bit / 64-bit. stdint.h gives explicit, fixed-width types like uint8_t (exactly 8bits/1byte) and uint32_t(exactly 32bits/4bytes) this guarentees the code runs exactly on the laptop or controller. 
+
+#define FRAME_SYNC_BYTE 0X002 
+Define Constant Macro: everywhere the compilier sees FRAME_SYNC_BYTE, it leaves behind a raw 0x02 byte. this is the "start of the text" flag the parser looks for to know if the new machine packet is staring. 
+
+#pragma pack(push, 1) 
+Overriding the memory controller: tells the compilier to temporaily change its rules. it pushes the current alignment state onto an internal compiler stack and enforces a strick 1-byte boundary alignment, this strips out all hidden layout padding. 
+
+typedef struct {
+    uint8_t sync_byte;     // 1 byte
+    uint32_t motor_rpm;    // 4 bytes
+    uint16_t voltage;      // 2 bytes
+    int16_t tempurature;   // 2 bytes
+    uint8_t crc8;          // 1 byte
+} TelemetryPacket;
+
+Data Blueprint Struct: maps the variables sequentially in memory. because of #pragma pack, motor_rpm start exactly 1 byte after sync_byte. voltage starts exactly 3 bytes after that. this guarantees tha tthe struct matches the raw 100byte binary stream exactly. 
+
+#pragma pack(pop)
+Restore compilier:normal compilier memory optimization aligmnet rules for the rest of any code that follows this block
+
+static inline uint8_t compute_crc8(cont uint8_t *data, size_t length) 
+inline function optimization: inline bypasses a standard function call overhead. insted of making the cpu jump across its memory space to exicute the code, it injects the logic directly inside your loops for lighting-fast parsing. const uint8_t *data provides read-only acess to the raw bytes. 
+
+crc ^= data[i];
+CRC bit shifting engine: feeds the nect byte of the stream into your CRC accumulator using an XOR gate op
+
+for (int bit = 0; bit < 8; bit++) {
+    if (crc & 0x80) {
+        crc = (crc << 1) ^ 0x31; 
+    } else { 
+        crc <<= 1; 
+    }
+}
+Shift the accumilator: 1 bit to the left(<<1) if the leftmost bit was a 1 (crc & 0x80), it applies an zor binary division againt your industrial polynomial (0x31). this scrambles the bits mathamaticlly, creating a highly sensitive mathematical seal over your data. 
+
+
+ 
