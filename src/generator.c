@@ -38,7 +38,7 @@ int main(void) {
 		packet.temperature = current_temp; 
 
 		// 4. compute CRC-8 over the first 9 bytes of the struc
-		// Cast the struct pointer to a raw uint9_T pointer so the funtion
+		// Cast the struct pointer to a raw uint8_T pointer so the funtion
 		// can walk through it byte-by-byte like a flat array. 
 		packet.crc8 = compute_crc8((const uint8_t *) &packet, 9); 
 

@@ -94,4 +94,44 @@ Throttling with usleep:
 
 without this while(1) the loop would run as fast as the i7 cpu could process and exicute. millions of times per seccond. usleep(50000) tells the kernel put this program to sleep for 500 millisecconds, wake me up when the time has passed. this is where RTOS and industrial clocks are important. we can talk about that more! 
 
+next we have to build our main.c the other end of the wire [  socat ---- main.c ] the biggest section of code so far so lets get started. 
 
+taming the kernel:
+     tty.clflag &= ~(ICANON | ECHO \ ECHOE \ ISIG); 
+
+one you open a terminal file descriptor the linux kernel default assists you with padding bytes. we need to force the kernel to stop this default function. (ICANON) kills canonicle mode. (ECHO | ECHOE) This disables echoing back input byes to sender. (ISIG) diables signal characters. if the machine accidentaly transmits a byte that catches Crtl+C (0x03 it wont intercept it and cancel the program 
+
+    tty.c_iflag &= ~(IXON | IXOFF | IXANY | ICRNL | INLCR); 
+Input flags, firstly (IXON |IXOFF) disables software flow control in and industrial enviroment if the data streams match those control charcters, the wire would freeze. (ICRNL | INLCR) Stop OS from translating carrier returns (\r) into newlines (\n) We need our raw bytes to stay exactly as they are sent. 
+
+    tty.c_cc[VMIN] = 1;
+    tty.c_cc[VTIME] = 0; 
+The c_cc array controls the control characters for timing. By setting VMIN =1 the read() system call is blocked until at least 1 byte arrives. the moment 1 byte hits the kernel buffer, read() instantly wakes up. This keeps our latency bounded to the physical arrival of data.
+
+The MEchanics of ingestion loop: 
+    ssize_t result = read(serial_fd, rx_buffer + bytes_read_total, sizeof(TelemetryPacket) - bytes_read_total); 
+rx_buffer + bytes_read_total; calculate exactly where to drop the newly arrived bytes in our stack array. if we've already read 3 bytes, rx_buffer + 3 shifts the storage pointer forward so we dotn overrider the data we already processed. 
+sizeof(TelemetryPacket) - bytes_read_total; tells the kernel the maximum number of bytes we are willing to accept in relation to the buffer pointer. 
+
+The Realignment Engine: 
+    if (rx_buffer[0] != FRAME_SYNC_BYTE) { 
+    memmove(rx_buffer, rx_buffer + 1, sizeof(TelemetryPacket) - 1); 
+    bytes_read_total--; 
+    continue: 
+} 
+if the recevier starts and the generator is sending packets already would read garbage bytes so our stream would be misalligned. insted of throwing away all the 10 bytes and losing the data memove slides the data window, copies bytes 1 - 9 and shifts them down to indicate 0 - 8. we decrement our counter (bytes_read_total--) and skip; the rest of the loop (continue). we keep sliding the window left until the indec 0 is exaclt 0x02. 
+
+Unmasking the bytes: 
+    TelemetryPacket *packet = (TelemetryPacket *)rx_buffer; 
+this is the inversion of the pointer cast trick we used in the generator. rx_buffer is just an array of raw uint8_t bytes. (TelemetryPacket *) tells the compilier to overlay our structed blueprint over this raw byte array. because we use #prama pack(1) the compilier maps the field perfectly to the array indices. packet->motor_rpm reads the 4 bytes, startingaty rx_buffer[1]. packet->voltage reads the 2 bytes starting at rx_buffer [5]. we use the -> because packet is a pointer to struc layout rather than a direct struct instance
+
+
+final thoughts for the day: 
+
+long day lots of progress! to finish day 2 i wanted to discuss my mental tranlation of this digital syteme and my understanding of analog power supply. 
+my first concept is that our pointer is doing exactly what an Op-amp dose. its inverting the signal while maintaing the core truth. our rx_buffer is unreadable, ambiguous bytes. but the inversion Telemetry packet blueprint flips how its interpreted. and now bytes 1 - 4 are motor_rpm in a structures integer. exactly how conceptually the op amp talkes raw current and creates a control output throught inversion. 
+
+my second thought  was CRC-8 and the XOR gate. this feeds into the physical Linear Feedback Shift Register. which used a chain of flipflops to shift bits left exactly like crc <<1, and Xor gates placed in polynomial formation 0x31.
+this also leads into wire differencial, canbus etc. the rabbit hole i dont qutie understand yet.
+
+thats it for day 2. bye 
